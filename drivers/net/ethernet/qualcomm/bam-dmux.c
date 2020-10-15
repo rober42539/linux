@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright (c) 2020  Stephan Gerhold
 
-// TODO: Remove
-#define DEBUG
-
 #include <linux/atomic.h>
 #include <linux/bitops.h>
 #include <linux/dma-mapping.h>
 #include <linux/dmaengine.h>
-#include <linux/etherdevice.h>
+#include <linux/if_arp.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/netdevice.h>
@@ -19,6 +16,7 @@
 #include <linux/soc/qcom/smem_state.h>
 #include <linux/spinlock.h>
 #include <linux/workqueue.h>
+#include <net/pkt_sched.h>
 
 #define BAM_DMUX_BUFFER_SIZE		SZ_2K
 #define BAM_DMUX_MAX_DATA_SIZE		(BAM_DMUX_BUFFER_SIZE - sizeof(struct bam_dmux_hdr))
@@ -87,7 +85,6 @@ struct bam_dmux {
 struct bam_dmux_netdev {
 	struct bam_dmux *dmux;
 	u8 ch;
-	bool open;
 };
 
 static void bam_dmux_pc_vote(struct bam_dmux *dmux, bool enable)
@@ -286,37 +283,22 @@ err:
 static int bam_dmux_netdev_open(struct net_device *netdev)
 {
 	struct bam_dmux_netdev *bndev = netdev_priv(netdev);
-	struct bam_dmux *dmux = bndev->dmux;
 	int ret;
 
-	/* Need to resume before starting the queue */
-	ret = pm_runtime_get_sync(dmux->dev);
-	if (ret < 0) {
-		pm_runtime_put_noidle(dmux->dev);
+	ret = bam_dmux_send_cmd(bndev, BAM_DMUX_HDR_CMD_OPEN);
+	if (ret)
 		return ret;
-	}
-
-	if (!bndev->open) {
-		ret = bam_dmux_send_cmd(bndev, BAM_DMUX_HDR_CMD_OPEN);
-		if (ret)
-			goto err;
-
-		bndev->open = true;
-	} else {
-		ret = 0;
-	}
 
 	netif_start_queue(netdev);
-
-err:
-	pm_runtime_mark_last_busy(dmux->dev);
-	pm_runtime_put_autosuspend(dmux->dev);
-	return ret;
+	return 0;
 }
 
 static int bam_dmux_netdev_stop(struct net_device *netdev)
 {
+	struct bam_dmux_netdev *bndev = netdev_priv(netdev);
+
 	netif_stop_queue(netdev);
+	bam_dmux_send_cmd(bndev, BAM_DMUX_HDR_CMD_CLOSE);
 	return 0;
 }
 
@@ -442,25 +424,33 @@ out:
 	pm_runtime_put_autosuspend(dmux->dev);
 }
 
-static const struct net_device_ops bam_dmux_ops_ether = {
-	.ndo_open		= bam_dmux_netdev_open,
-	.ndo_stop		= bam_dmux_netdev_stop,
-	.ndo_start_xmit		= bam_dmux_netdev_start_xmit,
-	.ndo_set_mac_address	= eth_mac_addr,
-	.ndo_validate_addr	= eth_validate_addr,
+static const struct net_device_ops bam_dmux_ops = {
+	.ndo_open	= bam_dmux_netdev_open,
+	.ndo_stop	= bam_dmux_netdev_stop,
+	.ndo_start_xmit	= bam_dmux_netdev_start_xmit,
 };
 
-static void bam_dmux_netdev_setup(struct net_device *netdev)
-{
-	/* Hardcode ethernet mode for now */
-	ether_setup(netdev);
-	random_ether_addr(netdev->dev_addr);
-	netdev->netdev_ops = &bam_dmux_ops_ether;
+static const struct device_type wwan_type = {
+	.name = "wwan",
+};
 
-	netdev->needed_headroom = sizeof(struct bam_dmux_hdr);
-	netdev->needed_tailroom = sizeof(u32); /* word-aligned */
-	netdev->max_mtu = 2000;
-	netdev->mtu = netdev->max_mtu;
+static void bam_dmux_netdev_setup(struct net_device *dev)
+{
+	dev->netdev_ops = &bam_dmux_ops;
+
+	dev->type = ARPHRD_RAWIP;
+	SET_NETDEV_DEVTYPE(dev, &wwan_type);
+	dev->flags = IFF_POINTOPOINT | IFF_NOARP;
+
+	dev->mtu = ETH_DATA_LEN;
+	dev->max_mtu = BAM_DMUX_MAX_DATA_SIZE;
+	dev->needed_headroom = sizeof(struct bam_dmux_hdr);
+	dev->needed_tailroom = sizeof(u32); /* word-aligned */
+	dev->tx_queue_len = DEFAULT_TX_QUEUE_LEN;
+
+	/* This perm addr will be used as interface identifier by IPv6 */
+	dev->addr_assign_type = NET_ADDR_RANDOM;
+	eth_random_addr(dev->perm_addr);
 }
 
 static void bam_dmux_register_netdev_work(struct work_struct *work)
@@ -483,6 +473,9 @@ static void bam_dmux_register_netdev_work(struct work_struct *work)
 				      bam_dmux_netdev_setup);
 		if (!netdev)
 			return; /* -ENOMEM */
+
+		SET_NETDEV_DEV(netdev, dmux->dev);
+		netdev->dev_port = ch;
 
 		bndev = netdev_priv(netdev);
 		bndev->dmux = dmux;
@@ -523,45 +516,13 @@ static bool bam_dmux_skb_dma_submit_rx(struct bam_dmux_skb_dma *skb_dma)
 
 static bool bam_dmux_skb_dma_queue_rx(struct bam_dmux_skb_dma *skb_dma, gfp_t gfp)
 {
-	skb_dma->skb = __netdev_alloc_skb_ip_align(NULL, BAM_DMUX_BUFFER_SIZE, gfp);
+	skb_dma->skb = __netdev_alloc_skb(NULL, BAM_DMUX_BUFFER_SIZE, gfp);
 	if (!skb_dma->skb)
 		return false;
 	skb_put(skb_dma->skb, BAM_DMUX_BUFFER_SIZE);
 
 	return bam_dmux_skb_dma_map(skb_dma, DMA_FROM_DEVICE) &&
 	       bam_dmux_skb_dma_submit_rx(skb_dma);
-}
-
-/* FIXME: For some reason the modem send raw-ip packets even in ethernet mode.
- * The qmi_wwan driver mentions a similar problem due to a "firmware bug",
- * and uses code similar to the one below to generate an ethernet header
- * in case of such weird packets.
- */
-static __be16 bam_dmux_eth_type_trans(struct sk_buff *skb, struct net_device *dev)
-{
-	__be16 protocol;
-
-	/* Determine L3 protocol */
-	switch (skb->data[0] & 0xf0) {
-	case 0x40:
-		protocol = htons(ETH_P_IP);
-		break;
-	case 0x60:
-		protocol = htons(ETH_P_IPV6);
-		break;
-	default:
-		/* Seems to be valid */
-		return eth_type_trans(skb, dev);
-	}
-
-	/* Generate a dummy ethernet header */
-	skb_push(skb, ETH_HLEN);
-	skb_reset_mac_header(skb);
-	eth_hdr(skb)->h_proto = protocol;
-	eth_zero_addr(eth_hdr(skb)->h_source);
-	memcpy(eth_hdr(skb)->h_dest, dev->dev_addr, ETH_ALEN);
-
-	return eth_type_trans(skb, dev);
 }
 
 static bool bam_dmux_cmd_data(struct bam_dmux_skb_dma *skb_dma)
@@ -587,8 +548,29 @@ static bool bam_dmux_cmd_data(struct bam_dmux_skb_dma *skb_dma)
 	skb_trim(skb, hdr->len);
 
 	skb->dev = netdev;
-	skb->protocol = bam_dmux_eth_type_trans(skb, netdev);
-	netif_rx_ni(skb);
+
+	/* There are several different configurations possible for the modem.
+	 *   - Ethernet / Raw-IP mode
+	 *   - Additional "QMI" QoS header
+	 *   - QMAP/rmnet MAP header (another muxing layer)
+	 *
+	 * Ethernet mode seems to be broken, Ethernet headers are only sent for
+	 * DHCP replies, all other packets are Raw-IP. Therefore, only Raw-IP
+	 * or QMAP mode are supported in this driver.
+	 */
+	switch (skb->data[0] & 0xf0) {
+	case 0x40:
+		skb->protocol = htons(ETH_P_IP);
+		break;
+	case 0x60:
+		skb->protocol = htons(ETH_P_IPV6);
+		break;
+	default:
+		skb->protocol = htons(ETH_P_MAP);
+		break;
+	}
+
+	netif_receive_skb(skb);
 
 	if (bam_dmux_skb_dma_queue_rx(skb_dma, GFP_ATOMIC))
 		dma_async_issue_pending(dmux->rx);
