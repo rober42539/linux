@@ -226,22 +226,6 @@
 		};
 	};
 
-	bam_dmux: ethernet-bam-dmux {
-		compatible = "qcom,bam-dmux";
-
-		interrupt-parent = <&hexagon_smsm>;
-		interrupts = <1 IRQ_TYPE_EDGE_BOTH>, <11 IRQ_TYPE_EDGE_BOTH>;
-		interrupt-names = "pc", "pc-ack";
-
-		qcom,smem-states = <&apps_smsm 1>, <&apps_smsm 11>;
-		qcom,smem-state-names = "pc", "pc-ack";
-
-		dmas = <&bam_dmux_dma 4>, <&bam_dmux_dma 5>;
-		dma-names = "tx", "rx";
-
-		status = "disabled";
-	};
-
 	firmware {
 		scm: scm {
 			compatible = "qcom,scm-msm8916", "qcom,scm";
@@ -1320,7 +1304,7 @@
 			#interrupt-cells = <4>;
 		};
 
-		bam_dmux_dma: dma@4044000 {
+		bam_dmux_dma: dma-controller@4044000 {
 			compatible = "qcom,bam-v1.7.0";
 			reg = <0x04044000 0x19000>;
 			interrupts = <GIC_SPI 29 IRQ_TYPE_LEVEL_HIGH>;
@@ -2114,6 +2098,22 @@
 			     <GIC_PPI 3 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_LOW)>,
 			     <GIC_PPI 4 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_LOW)>,
 			     <GIC_PPI 1 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_LOW)>;
+	};
+
+	bam_dmux: wwan {
+		compatible = "qcom,bam-dmux";
+
+		interrupt-parent = <&hexagon_smsm>;
+		interrupts = <1 IRQ_TYPE_EDGE_BOTH>, <11 IRQ_TYPE_EDGE_BOTH>;
+		interrupt-names = "pc", "pc-ack";
+
+		qcom,smem-states = <&apps_smsm 1>, <&apps_smsm 11>;
+		qcom,smem-state-names = "pc", "pc-ack";
+
+		dmas = <&bam_dmux_dma 4>, <&bam_dmux_dma 5>;
+		dma-names = "tx", "rx";
+
+		status = "disabled";
 	};
 };
 
