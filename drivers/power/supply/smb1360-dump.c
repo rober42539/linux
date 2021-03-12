@@ -214,7 +214,7 @@ static void smb1360_reg_dump(const struct smb1360_reg *reg, const u8 val[])
 		return;
 	case LITTLE_ENDIAN:
 		for (i = 0; i < reg->size; ++i) {
-			num |= val[i] << (8*i);
+			num |= val[i] << (8 * i);
 		}
 		break;
 	case BIG_ENDIAN:
@@ -226,7 +226,6 @@ static void smb1360_reg_dump(const struct smb1360_reg *reg, const u8 val[])
 	}
 
 	pr_info("\t<%#x> %s %0*x\n", reg->addr, reg->name, 2 * reg->size, num);
-
 }
 
 static void smb1360_regset_dump(struct i2c_client *client, const struct smb1360_regset *set)
