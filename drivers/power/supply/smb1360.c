@@ -744,7 +744,6 @@ static int smb1360_enable_fg_access(struct smb1360 *smb)
 err:
 	dev_err(smb->dev, "failed to enable fg access: %d\n", ret);
 	return ret;
-
 }
 
 static int smb1360_disable_fg_access(struct smb1360 *smb)
@@ -961,8 +960,7 @@ static int smb1360_reconf_otp(struct smb1360 *smb)
 	if (ret)
 		goto out;
 
-	ret = regmap_set_bits(smb->regmap, CFG_FG_BATT_CTRL_REG,
-				 CFG_FG_OTP_BACK_UP_ENABLE);
+	ret = regmap_set_bits(smb->regmap, CFG_FG_BATT_CTRL_REG, CFG_FG_OTP_BACK_UP_ENABLE);
 	if (ret)
 		dev_err(smb->dev, "failed to enable OTP back-up: %d\n", ret);
 
