@@ -46,6 +46,19 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&tkey_led_en_default>;
 	};
+
+	brrr_pwm: pwm-vibrator {
+		compatible = "clk-pwm";
+		#pwm-cells = <3>;
+
+		clocks = <&gcc GCC_GP2_CLK>;
+
+		assigned-clocks = <&gcc GP2_CLK_SRC>;
+		assigned-clock-parents = <&gcc GPLL0_VOTE>;
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&pwm_vibrator_default>;
+	};
 };
 
 &touchkey {
@@ -126,6 +139,11 @@
 
 		drive-strength = <2>;
 		bias-disable;
+	};
+
+	pwm_vibrator_default: pwm-vibrator-default {
+		pins = "gpio50";
+		function = "gcc_gp2_clk_a";
 	};
 
 	ts_int_default: ts-int-default {
