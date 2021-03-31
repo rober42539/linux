@@ -148,6 +148,35 @@
 		enable-active-high;
 	};
 
+	i2c-fuelgauge {
+		compatible = "i2c-gpio";
+		sda-gpios = <&msmgpio 14 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&msmgpio 15 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&fuelgauge_i2c_default>;
+
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		fuel-gauge@36 {
+			// HACK: It's MAX77849 MFD. fg seems compatible
+			compatible = "maxim,max17047";
+			reg = <0x36>;
+
+			maxim,rsns-microohm = <10000>;
+			maxim,over-heat-temp = <600>;
+			maxim,over-volt = <4400>;
+
+			interrupt-parent = <&msmgpio>;
+			interrupts = <121 IRQ_TYPE_EDGE_FALLING>;
+
+			pinctrl-names = "default";
+			pinctrl-0 = <&fg_int_default>;
+		};
+
+	};
+
 	// FIXME: Use extcon device provided by MUIC driver when available
 	usb_vbus: usb-vbus {
 		compatible = "linux,extcon-usb-gpio";
@@ -418,6 +447,22 @@
 &msmgpio {
 	buckbooster_en_default: buckbooster-en-default {
 		pins = "gpio51";
+		function = "gpio";
+
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	fg_int_default: fg-int-default {
+		pins = "gpio121";
+		function = "gpio";
+
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	fuelgauge_i2c_default: fuelgauge-i2c-default {
+		pins = "gpio14", "gpio15";
 		function = "gpio";
 
 		drive-strength = <2>;
