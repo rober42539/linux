@@ -269,6 +269,24 @@
 			syna,sensor-type = <1>; // Touchscreen
 		};
 	};
+
+	touchscreen@48 {
+		compatible = "himax,852x";
+		reg = <0x48>;
+
+		interrupt-parent = <&msmgpio>;
+		interrupts = <13 IRQ_TYPE_LEVEL_LOW>;
+
+		reset-gpio = <&msmgpio 12 GPIO_ACTIVE_HIGH>;
+
+		vdd-supply = <&reg_ctp>;
+		vio-supply = <&pm8916_l6>;
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&tp_int_default>;
+
+		linux,keycodes = <KEY_BACK KEY_HOMEPAGE KEY_APPSELECT>;
+	};
 };
 
 &blsp1_uart2 {
@@ -569,7 +587,7 @@
 	};
 
 	tp_int_default: tp-int-default {
-		pins = "gpio13";
+		pins = "gpio12", "gpio13";
 		function = "gpio";
 
 		drive-strength = <2>;
